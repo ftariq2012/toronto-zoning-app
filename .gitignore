@@ -19,3 +19,6 @@ Thumbs.db
 data/raw/address_points.geojson
 frontend/public/data/address_points_clean.geojson
 frontend/public/data/address_points_index.json
+
+# Downloaded raw data
+data/raw/
