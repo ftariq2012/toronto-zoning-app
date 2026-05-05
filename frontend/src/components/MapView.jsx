@@ -1,51 +1,36 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { bbox } from "@turf/turf";
 import { geoJSON } from "leaflet";
-import { GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet";
 import {
-  bbox,
-  booleanPointInPolygon,
-  point,
-  pointToLineDistance,
-} from "@turf/turf";
+  CircleMarker,
+  GeoJSON,
+  MapContainer,
+  TileLayer,
+  useMap,
+} from "react-leaflet";
+import SearchBar from "./SearchBar.jsx";
+import {
+  buildSelectedZoneFromPoint,
+  findOverlayMatches,
+} from "../utils/spatialMatching.js";
 
 const TORONTO_CENTER = [43.6532, -79.3832];
 const MAIN_DATA_URL = "/data/zoning_area_clean.geojson";
-const LINE_MATCH_TOLERANCE_KM = 0.025;
+const ADDRESS_INDEX_URL = "/data/address_points_index.json";
 const BBOX_PADDING_DEGREES = 0.00035;
 
 const OVERLAY_DATASETS = [
-  {
-    key: "height",
-    url: "/data/zoning_height_overlay_clean.geojson",
-  },
-  {
-    key: "parking",
-    url: "/data/parking_zone_overlay_clean.geojson",
-  },
-  {
-    key: "policy_area",
-    url: "/data/zoning_policy_area_overlay_clean.geojson",
-  },
-  {
-    key: "policy_road",
-    url: "/data/zoning_policy_road_overlay_clean.geojson",
-  },
-  {
-    key: "priority_retail",
-    url: "/data/zoning_priority_retail_street_overlay_clean.geojson",
-  },
-  {
-    key: "rooming_house",
-    url: "/data/zoning_rooming_house_overlay_clean.geojson",
-  },
-  {
-    key: "lot_coverage",
-    url: "/data/zoning_lot_coverage_overlay_clean.geojson",
-  },
-  {
-    key: "building_setback",
-    url: "/data/zoning_building_setback_overlay_clean.geojson",
-  },
+  ["height", "/data/zoning_height_overlay_clean.geojson"],
+  ["parking", "/data/parking_zone_overlay_clean.geojson"],
+  ["policy_area", "/data/zoning_policy_area_overlay_clean.geojson"],
+  ["policy_road", "/data/zoning_policy_road_overlay_clean.geojson"],
+  [
+    "priority_retail",
+    "/data/zoning_priority_retail_street_overlay_clean.geojson",
+  ],
+  ["rooming_house", "/data/zoning_rooming_house_overlay_clean.geojson"],
+  ["lot_coverage", "/data/zoning_lot_coverage_overlay_clean.geojson"],
+  ["building_setback", "/data/zoning_building_setback_overlay_clean.geojson"],
 ];
 
 const baseStyle = {
@@ -89,18 +74,33 @@ function FitBounds({ data }) {
   return null;
 }
 
-export default function MapView({ selectedZone, onSelectZone }) {
+function AddressMapController({ selectedAddress }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!selectedAddress) {
+      return;
+    }
+
+    map.setView([selectedAddress.lat, selectedAddress.lng], 17);
+  }, [map, selectedAddress]);
+
+  return null;
+}
+
+export default function MapView({ onSelectZone }) {
   const [zoningData, setZoningData] = useState(null);
   const [overlayData, setOverlayData] = useState({});
+  const [addressIndex, setAddressIndex] = useState([]);
+  const [addressStatus, setAddressStatus] = useState("idle");
+  const [selectedAddress, setSelectedAddress] = useState(null);
   const [loadState, setLoadState] = useState("loading");
   const [overlayLoadState, setOverlayLoadState] = useState("loading");
   const selectedLayerRef = useRef(null);
 
   const indexedOverlayData = useMemo(() => {
-    return OVERLAY_DATASETS.reduce((indexed, dataset) => {
-      const features = overlayData[dataset.key]?.features ?? [];
-
-      indexed[dataset.key] = features.map((feature) => {
+    return Object.entries(overlayData).reduce((indexed, [key, data]) => {
+      indexed[key] = (data?.features ?? []).map((feature) => {
         try {
           return {
             feature,
@@ -150,12 +150,12 @@ export default function MapView({ selectedZone, onSelectZone }) {
     let isMounted = true;
 
     Promise.all(
-      OVERLAY_DATASETS.map((dataset) =>
-        fetch(dataset.url).then((response) => {
+      OVERLAY_DATASETS.map(([key, url]) =>
+        fetch(url).then((response) => {
           if (!response.ok) {
-            throw new Error(`Could not load ${dataset.url}`);
+            throw new Error(`Could not load ${url}`);
           }
-          return response.json().then((data) => [dataset.key, data]);
+          return response.json().then((data) => [key, data]);
         }),
       ),
     )
@@ -176,49 +176,30 @@ export default function MapView({ selectedZone, onSelectZone }) {
     };
   }, []);
 
-  const featureMatchesPoint = (feature, turfPoint) => {
-    const geometryType = feature?.geometry?.type;
-
-    if (!geometryType) {
-      return false;
+  const loadAddressIndex = () => {
+    if (addressStatus !== "idle") {
+      return;
     }
 
-    try {
-      if (geometryType === "Polygon" || geometryType === "MultiPolygon") {
-        return booleanPointInPolygon(turfPoint, feature);
-      }
-
-      if (geometryType === "LineString") {
-        return (
-          pointToLineDistance(turfPoint, feature, { units: "kilometers" }) <=
-          LINE_MATCH_TOLERANCE_KM
+    setAddressStatus("loading");
+    fetch(ADDRESS_INDEX_URL)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Address search data not found.");
+        }
+        return response.json();
+      })
+      .then((data) => {
+        setAddressIndex(Array.isArray(data) ? data : []);
+        setAddressStatus(Array.isArray(data) && data.length ? "ready" : "missing");
+      })
+      .catch((error) => {
+        console.warn(
+          "Address search data not found. Run the data preparation scripts.",
+          error,
         );
-      }
-
-      if (geometryType === "MultiLineString") {
-        return feature.geometry.coordinates.some((coordinates) => {
-          const lineFeature = {
-            type: "Feature",
-            properties: {},
-            geometry: {
-              type: "LineString",
-              coordinates,
-            },
-          };
-
-          return (
-            pointToLineDistance(turfPoint, lineFeature, {
-              units: "kilometers",
-            }) <= LINE_MATCH_TOLERANCE_KM
-          );
-        });
-      }
-    } catch (error) {
-      console.warn("Skipping overlay feature match after Turf error", error);
-      return false;
-    }
-
-    return false;
+        setAddressStatus("missing");
+      });
   };
 
   const pointIsNearBounds = (latlng, bounds) => {
@@ -236,19 +217,37 @@ export default function MapView({ selectedZone, onSelectZone }) {
     );
   };
 
-  const findOverlayMatches = (latlng) => {
-    const turfPoint = point([latlng.lng, latlng.lat]);
+  const findIndexedOverlayMatches = (latlng) => {
+    const candidateOverlayData = Object.entries(indexedOverlayData).reduce(
+      (data, [key, indexedFeatures]) => {
+        data[key] = {
+          type: "FeatureCollection",
+          features: indexedFeatures
+            .filter(({ bounds }) => pointIsNearBounds(latlng, bounds))
+            .map(({ feature }) => feature),
+        };
+        return data;
+      },
+      {},
+    );
 
-    return OVERLAY_DATASETS.reduce((matches, dataset) => {
-      const indexedFeatures = indexedOverlayData[dataset.key] ?? [];
+    return findOverlayMatches(latlng, candidateOverlayData);
+  };
 
-      matches[dataset.key] = indexedFeatures
-        .filter(({ bounds }) => pointIsNearBounds(latlng, bounds))
-        .filter(({ feature }) => featureMatchesPoint(feature, turfPoint))
-        .map(({ feature }) => feature.properties ?? {});
+  const handleAddressSelect = (address) => {
+    const point = {
+      lat: Number(address.lat),
+      lng: Number(address.lng),
+    };
+    const selectedResult = buildSelectedZoneFromPoint(
+      point,
+      zoningData,
+      overlayData,
+      address,
+    );
 
-      return matches;
-    }, {});
+    setSelectedAddress(address);
+    onSelectZone(selectedResult);
   };
 
   const onEachFeature = (feature, layer) => {
@@ -264,26 +263,21 @@ export default function MapView({ selectedZone, onSelectZone }) {
         selectedLayerRef.current = layer;
         layer.setStyle(selectedStyle);
         layer.bringToFront();
+        setSelectedAddress(null);
 
-        const selectedResult = {
+        const clickedPoint = {
+          lat: event.latlng.lat,
+          lng: event.latlng.lng,
+        };
+
+        onSelectZone({
           main: {
             properties: feature.properties,
           },
-          overlays: {},
-          clicked_point: {
-            lat: event.latlng.lat,
-            lng: event.latlng.lng,
-          },
-        };
-
-        try {
-          selectedResult.overlays = findOverlayMatches(event.latlng);
-        } catch (error) {
-          console.warn("Could not complete overlay matching", error);
-        }
-
-        onSelectZone({
-          ...selectedResult,
+          overlays: findIndexedOverlayMatches(clickedPoint),
+          clicked_point: clickedPoint,
+          selected_address: null,
+          no_result: false,
         });
       },
       mouseover: () => {
@@ -302,6 +296,13 @@ export default function MapView({ selectedZone, onSelectZone }) {
 
   return (
     <div className="map-wrap">
+      <SearchBar
+        addresses={addressIndex}
+        status={addressStatus}
+        onRequestAddresses={loadAddressIndex}
+        onSelectAddress={handleAddressSelect}
+      />
+
       <MapContainer
         center={TORONTO_CENTER}
         zoom={11}
@@ -324,6 +325,20 @@ export default function MapView({ selectedZone, onSelectZone }) {
               onEachFeature={onEachFeature}
             />
           </>
+        ) : null}
+
+        <AddressMapController selectedAddress={selectedAddress} />
+        {selectedAddress ? (
+          <CircleMarker
+            center={[selectedAddress.lat, selectedAddress.lng]}
+            radius={7}
+            pathOptions={{
+              color: "#991b1b",
+              fillColor: "#ef4444",
+              fillOpacity: 0.9,
+              weight: 2,
+            }}
+          />
         ) : null}
       </MapContainer>
 

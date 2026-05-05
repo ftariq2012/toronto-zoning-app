@@ -1,11 +1,15 @@
 import React from "react";
 import Disclaimer from "./Disclaimer.jsx";
 import {
+  buildPlainEnglishSummary,
+  cleanDisplayValue,
   formatLabel,
   formatParsedZoning,
+  formatParkingOverlay,
   getHeightOverlayText,
   getZoneName,
   isDisplayableValue,
+  parseLotCoverageOverlay,
   parseZoningString,
 } from "../utils/zoningFormatters.js";
 
@@ -21,19 +25,16 @@ const OVERLAY_SECTIONS = [
   ["building_setback", "Building Setback Overlay"],
 ];
 
-function displayValue(value, fallback = "Not listed") {
-  return isDisplayableValue(value) ? value : fallback;
-}
-
 function DetailRow({ label, value }) {
-  if (!isDisplayableValue(value)) {
+  const displayValue = cleanDisplayValue(value);
+  if (!displayValue) {
     return null;
   }
 
   return (
     <div className="detail-row">
       <dt>{label}</dt>
-      <dd>{displayValue(value)}</dd>
+      <dd>{displayValue}</dd>
     </div>
   );
 }
@@ -63,29 +64,45 @@ function KeyValueList({ rows }) {
   );
 }
 
-function OverlayMatch({ properties, index, isHeight }) {
-  const heightText = isHeight ? getHeightOverlayText(properties) : "";
+function readableOverlayFacts(overlayKey, properties) {
+  if (overlayKey === "height") {
+    return [getHeightOverlayText(properties)].filter(Boolean);
+  }
+
+  if (overlayKey === "lot_coverage") {
+    return [parseLotCoverageOverlay(properties)].filter(Boolean);
+  }
+
+  if (overlayKey === "parking") {
+    return [formatParkingOverlay(properties)].filter(Boolean);
+  }
+
+  return [];
+}
+
+function OverlayMatch({ properties, index, overlayKey }) {
+  const readableFacts = readableOverlayFacts(overlayKey, properties);
   const entries = Object.entries(properties ?? {}).filter(
     ([key, value]) => key !== "geometry" && isDisplayableValue(value),
   );
 
-  if (!entries.length && !heightText) {
+  if (!entries.length && !readableFacts.length) {
     return null;
   }
 
   return (
     <div className="overlay-match">
       <h3>Match {index + 1}</h3>
-      {heightText ? <p className="readable-fact">{heightText}</p> : null}
+      {readableFacts.map((fact) => (
+        <p className="readable-fact" key={fact}>
+          {fact}
+        </p>
+      ))}
       {entries.length ? (
-        <dl className="overlay-list">
-          {entries.map(([key, value]) => (
-            <div className="overlay-row" key={key}>
-              <dt>{formatLabel(key)}</dt>
-              <dd>{String(value)}</dd>
-            </div>
-          ))}
-        </dl>
+        <details className="mini-details">
+          <summary>Raw matched fields</summary>
+          <RawProperties properties={properties} />
+        </details>
       ) : null}
     </div>
   );
@@ -107,7 +124,7 @@ function OverlaySection({ title, matches, overlayKey }) {
             key={`${title}-${index}`}
             properties={properties}
             index={index}
-            isHeight={overlayKey === "height"}
+            overlayKey={overlayKey}
           />
         ))
       ) : (
@@ -158,7 +175,7 @@ function RawProperties({ properties, title }) {
           {entries.map(([key, value]) => (
             <div className="overlay-row" key={key}>
               <dt>{formatLabel(key)}</dt>
-              <dd>{String(value)}</dd>
+              <dd>{cleanDisplayValue(value)}</dd>
             </div>
           ))}
         </dl>
@@ -169,67 +186,98 @@ function RawProperties({ properties, title }) {
   );
 }
 
+function EmptyPanel() {
+  return (
+    <div className="empty-state">
+      <p>
+        Search a Toronto address or click a zoning polygon to combine the main
+        zoning record with matching zoning overlays at that point.
+      </p>
+
+      <section className="start-guide">
+        <h2>Main zoning area</h2>
+        <ul>
+          <li>Plain-English zoning summary</li>
+          <li>Readable zone name and raw zone code</li>
+          <li>Parsed density, frontage, lot area, units, and exceptions</li>
+          <li>By-law chapter, section, and exception reference</li>
+        </ul>
+      </section>
+
+      <section className="start-guide">
+        <h2>Overlay data checked</h2>
+        <ul>
+          <li>Height Overlay, including maximum permitted height</li>
+          <li>Lot Coverage Overlay, including maximum lot coverage</li>
+          <li>Parking Zone Overlay</li>
+          <li>Policy Area and Policy Road overlays</li>
+          <li>Priority Retail Street and Rooming House overlays</li>
+          <li>Building Setback Overlay</li>
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 export default function ZoningPanel({ zone }) {
   const properties = zone?.main?.properties;
   const parsedZoning = parseZoningString(properties?.zone_string);
   const parsedRows = formatParsedZoning(parsedZoning);
-  const zoneName = getZoneName(properties?.zone_code);
-  const heightMatches = zone?.overlays?.height ?? [];
-  const heightText = heightMatches.map(getHeightOverlayText).find(Boolean);
+  const zoneCode = cleanDisplayValue(properties?.zone_code || parsedZoning.zoneCode);
+  const zoneName = getZoneName(zoneCode);
+  const summary = properties
+    ? buildPlainEnglishSummary(properties, zone?.overlays ?? {})
+    : "";
 
   return (
     <aside className="zoning-panel" aria-label="Selected zoning details">
       <div className="panel-header">
         <p className="eyebrow">Toronto zoning lookup</p>
-        <h1>
-          {properties?.zone_code
-            ? `${properties.zone_code} - ${zoneName}`
-            : "Select a zoning area"}
-        </h1>
+        <h1>{zoneCode ? `${zoneCode} - ${zoneName}` : "Select a location"}</h1>
       </div>
 
-      {properties ? (
+      {zone?.selected_address ? (
+        <div className="selected-address">
+          Selected address: {zone.selected_address.address_label}
+        </div>
+      ) : null}
+
+      {zone?.no_result ? (
         <>
-          <Section title="Summary">
+          <Section title="No zoning polygon found">
+            <p className="no-result">
+              No zoning polygon was found for this address point. Try another
+              nearby address or click the map directly.
+            </p>
+          </Section>
+          <SharedFooter />
+        </>
+      ) : properties ? (
+        <>
+          <Section title="Plain-English Summary">
             <div className="summary-box">
-              <p>
-                This point is in the {zoneName}{" "}
-                <strong>({properties.zone_code})</strong>.
-              </p>
-              {properties.zone_string ? (
-                <p>Full zoning string: {properties.zone_string}</p>
-              ) : null}
-              {parsedRows.length ? (
-                <ul className="summary-list">
-                  {parsedRows.map(([label, value]) => (
-                    <li key={label}>
-                      <span>{label}</span>
-                      <strong>{value}</strong>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              {heightText ? <p>{heightText}</p> : null}
+              <p>{summary}</p>
             </div>
           </Section>
 
           <Section title="Main Zoning">
             <KeyValueList
               rows={[
-                ["Zone code", `${properties.zone_code} - ${zoneName}`],
+                ["Zone code", zoneCode ? `${zoneCode} - ${zoneName}` : ""],
                 ["Full zoning string", properties.zone_string],
               ]}
             />
           </Section>
 
+          <Section title="Parsed Zoning Rules">
+            <KeyValueList rows={parsedRows} />
+          </Section>
+
           <Section title="Lot/Building Standards">
             <KeyValueList
               rows={[
-                ["Density / FSI from zoning string", parsedZoning.density],
-                ["Minimum frontage from zoning string", parsedZoning.frontage ? `${parsedZoning.frontage} m` : ""],
-                ["Minimum lot area from zoning string", parsedZoning.lotArea ? `${parsedZoning.lotArea} m2` : ""],
                 ["Minimum frontage field", properties.frontage ? `${properties.frontage} m` : ""],
-                ["Minimum lot area field", properties.lot_area ? `${properties.lot_area} m2` : ""],
+                ["Minimum lot area field", properties.lot_area ? `${properties.lot_area} m²` : ""],
                 ["Coverage", properties.coverage],
               ]}
             />
@@ -260,7 +308,7 @@ export default function ZoningPanel({ zone }) {
           </Section>
 
           <div className="clicked-point">
-            Clicked point: {zone.clicked_point.lat.toFixed(6)},{" "}
+            Selected point: {zone.clicked_point.lat.toFixed(6)},{" "}
             {zone.clicked_point.lng.toFixed(6)}
           </div>
 
@@ -269,58 +317,28 @@ export default function ZoningPanel({ zone }) {
             overlays={zone.overlays}
           />
 
-          <div className="source-box">
-            <span>Source</span>
-            <a href={SOURCE_URL} target="_blank" rel="noreferrer">
-              City of Toronto Zoning By-law Open Data
-            </a>
-          </div>
-
-          <Disclaimer />
+          <SharedFooter />
         </>
       ) : (
-        <div className="empty-state">
-          <p>
-            Click a zoning polygon on the map to combine the main zoning area
-            record with matching zoning overlays at that point.
-          </p>
-
-          <section className="start-guide">
-            <h2>Main zoning area</h2>
-            <ul>
-              <li>Readable zone name and raw zone code</li>
-              <li>Full zoning string</li>
-              <li>Parsed density / FSI</li>
-              <li>Parsed minimum frontage</li>
-              <li>Parsed minimum lot area</li>
-              <li>Parsed site-specific exception</li>
-              <li>By-law chapter, section, and exception reference</li>
-            </ul>
-          </section>
-
-          <section className="start-guide">
-            <h2>Overlay data checked</h2>
-            <ul>
-              <li>Height Overlay, including maximum permitted height</li>
-              <li>Parking Zone Overlay</li>
-              <li>Policy Area Overlay</li>
-              <li>Policy Road Overlay</li>
-              <li>Priority Retail Street Overlay</li>
-              <li>Rooming House Overlay</li>
-              <li>Lot Coverage Overlay</li>
-              <li>Building Setback Overlay</li>
-            </ul>
-          </section>
-
-          <div className="source-box">
-            <span>Source</span>
-            <a href={SOURCE_URL} target="_blank" rel="noreferrer">
-              City of Toronto Zoning By-law Open Data
-            </a>
-          </div>
-          <Disclaimer />
-        </div>
+        <>
+          <EmptyPanel />
+          <SharedFooter />
+        </>
       )}
     </aside>
+  );
+}
+
+function SharedFooter() {
+  return (
+    <>
+      <div className="source-box">
+        <span>Source</span>
+        <a href={SOURCE_URL} target="_blank" rel="noreferrer">
+          City of Toronto Zoning By-law Open Data
+        </a>
+      </div>
+      <Disclaimer />
+    </>
   );
 }

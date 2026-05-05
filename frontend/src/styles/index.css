@@ -46,6 +46,82 @@ a {
   position: relative;
 }
 
+.search-bar {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 700;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+  padding: 12px;
+}
+
+.search-bar label {
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.search-bar input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  color: #172033;
+  font: inherit;
+  padding: 10px 11px;
+}
+
+.search-bar input:focus {
+  border-color: #2563eb;
+  outline: 2px solid rgba(37, 99, 235, 0.18);
+}
+
+.search-message {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.suggestions {
+  display: grid;
+  gap: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  list-style: none;
+}
+
+.suggestions button {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #172033;
+  cursor: pointer;
+  font: inherit;
+  padding: 10px 11px;
+  text-align: left;
+}
+
+.suggestions li:last-child button {
+  border-bottom: 0;
+}
+
+.suggestions button:hover,
+.suggestions button:focus {
+  background: #eff6ff;
+  outline: none;
+}
+
 html,
 body,
 #root {
@@ -62,7 +138,7 @@ body,
 .map-status {
   position: absolute;
   left: 16px;
-  top: 16px;
+  top: 112px;
   z-index: 500;
   max-width: min(360px, calc(100vw - 32px));
   border: 1px solid #cbd5e1;
@@ -75,7 +151,7 @@ body,
 }
 
 .map-status-secondary {
-  top: 74px;
+  top: 170px;
 }
 
 .zoning-panel {
@@ -197,6 +273,22 @@ h1 {
   font-size: 0.86rem;
 }
 
+.selected-address {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  padding: 10px 12px;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.no-result {
+  margin: 0;
+  color: #475569;
+  line-height: 1.5;
+}
+
 .overlay-sections {
   display: grid;
   gap: 14px;
@@ -291,6 +383,18 @@ h1 {
 .advanced-details summary {
   cursor: pointer;
   color: #111827;
+  font-weight: 700;
+}
+
+.mini-details {
+  display: grid;
+  gap: 8px;
+}
+
+.mini-details summary {
+  cursor: pointer;
+  color: #475569;
+  font-size: 0.86rem;
   font-weight: 700;
 }
 
