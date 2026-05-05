@@ -4,11 +4,15 @@ frontend/dist/
 frontend/.vite/
 
 # Python
-__pycache__/
-*.pyc
+backend/.venv/
 .venv/
 venv/
+__pycache__/
+*.pyc
+
+# Environment
 .env
+backend/.env
 
 # OS / editor
 .DS_Store
@@ -16,9 +20,7 @@ Thumbs.db
 .vscode/
 
 # Large generated/downloaded data
+data/raw/
 data/raw/address_points.geojson
 frontend/public/data/address_points_clean.geojson
 frontend/public/data/address_points_index.json
-
-# Downloaded raw data
-data/raw/

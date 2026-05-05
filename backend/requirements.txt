@@ -1,7 +1,7 @@
-geopandas
-pandas
-requests
+fastapi
+uvicorn[standard]
 sqlalchemy
 psycopg[binary]
 geoalchemy2
 python-dotenv
+pydantic-settings

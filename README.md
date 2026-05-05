@@ -1,33 +1,47 @@
 # Toronto Zoning Lookup
 
-A frontend-only Toronto zoning lookup prototype built with React, Vite, Leaflet, React Leaflet, and Turf.js.
+A Toronto zoning lookup app using React, Vite, Leaflet, Turf.js, FastAPI, and PostGIS.
 
-The app displays City of Toronto zoning polygons. Users can click a polygon or search a Toronto address to see the main zoning record, parsed zoning rules, matching overlay data, by-law references, and collapsible raw data.
-
-Data comes from [City of Toronto Open Data](https://open.toronto.ca/), including the Zoning By-law dataset and Address Points (Municipal) - Toronto One Address Repository.
+The app lets users click a map location or search a Toronto address, then returns the main zoning area, matching overlays, by-law references, and a plain-English summary. Data comes from City of Toronto Open Data through the CKAN API.
 
 ## Project Structure
 
 ```text
 toronto-zoning-app/
+  backend/
   data/raw/
+  frontend/
   frontend/public/data/
   scripts/
-  frontend/
+  docker-compose.yml
 ```
 
-## Setup
+## Database Port
 
-Clone the repository:
+Local PostgreSQL may already use port `5432`, so this project maps Docker PostGIS to host port `5433`.
 
-```bash
-git clone https://github.com/YOUR_USERNAME/toronto-zoning-app.git
-cd toronto-zoning-app
+Local development database URL:
+
+```text
+postgresql+psycopg://postgres:postgres@localhost:5433/zoning_db
 ```
 
-Create or activate a Python environment:
+## Prerequisites
+
+- Docker Desktop
+- Python 3.11+
+- Node.js
+
+## Start PostGIS
 
 ```bash
+docker compose up -d db
+```
+
+## Install Backend Dependencies
+
+```bash
+cd backend
 python -m venv .venv
 ```
 
@@ -43,26 +57,32 @@ macOS/Linux:
 source .venv/bin/activate
 ```
 
-Install Python dependencies:
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-If using Conda:
+Copy environment settings:
 
 ```bash
-conda create -n toronto-zoning python=3.11
-conda activate toronto-zoning
-conda install -c conda-forge geopandas pandas requests
+cp .env.example .env
 ```
 
-## Download Official Data
+On Windows PowerShell:
 
-Download official Toronto zoning and address data:
+```powershell
+Copy-Item .env.example .env
+```
+
+## Download, Prepare, and Load Data
+
+From the project root:
 
 ```bash
 python scripts/download_zoning_from_api.py
+python scripts/prepare_all_zoning_data.py
+python scripts/load_to_postgis.py
 ```
 
 Raw official data is downloaded into:
@@ -71,72 +91,84 @@ Raw official data is downloaded into:
 data/raw/
 ```
 
-The downloader uses Toronto's CKAN API. It downloads target GeoJSON resources from the Zoning By-law package and attempts to download Address Points from the Municipal Toronto One Address Repository package. If address data cannot be identified, the script prints candidate package IDs and the zoning workflow continues.
-
-## Prepare Frontend Data
-
-Prepare cleaned frontend-ready GeoJSON and address search index files:
-
-```bash
-python scripts/prepare_all_zoning_data.py
-```
-
-Cleaned frontend data is written to:
+Cleaned frontend-ready GeoJSON files are written to:
 
 ```text
 frontend/public/data/
 ```
 
-Generated files include zoning layers, overlay layers, `address_points_clean.geojson`, and `address_points_index.json` when address data is available.
+The PostGIS loader creates these tables:
 
-## Run the Frontend
+- `zoning_area`
+- `zoning_height_overlay`
+- `zoning_lot_coverage_overlay`
+- `parking_zone_overlay`
+- `zoning_building_setback_overlay`
+- `zoning_policy_area_overlay`
+- `zoning_policy_road_overlay`
+- `zoning_priority_retail_street_overlay`
+- `zoning_rooming_house_overlay`
+- `address_points`
+
+## Run Backend
+
+From `backend/`:
 
 ```bash
-cd frontend
+uvicorn app.main:app --reload
+```
+
+Useful local URLs:
+
+```text
+http://localhost:8000/health
+http://localhost:8000/docs
+http://localhost:8000/api/zoning?lat=43.6532&lng=-79.3832
+```
+
+## Run Frontend
+
+From `frontend/`:
+
+```bash
 npm install
 npm run dev
 ```
 
-Open the local development URL printed by Vite, usually:
+The frontend uses:
 
 ```text
-http://localhost:5173/
+VITE_API_URL=http://localhost:8000
 ```
 
-## Features
+See `frontend/.env.example`.
 
-- Interactive Toronto zoning map
-- Polygon click lookup
-- Address search using local prepared address points
-- Plain-English zoning summaries
-- Parsed zoning-string rules such as density, frontage, lot area, units, site-specific exceptions, and standards sets
-- Matching zoning overlays shown in the side panel
-- Collapsible advanced raw data
+## Frontend Deployment
+
+The frontend remains deployable to Vercel as a static Vite app. The FastAPI backend and PostGIS database need separate hosting for production.
 
 ## Current Architecture
 
 ```text
 City of Toronto CKAN API
-  -> scripts/download_zoning_from_api.py
-  -> data/raw/
-  -> scripts/prepare_all_zoning_data.py
-  -> frontend/public/data/
-  -> React + Vite + Leaflet + Turf.js
+  -> Python download/prepare scripts
+  -> PostGIS
+  -> FastAPI
+  -> React + Leaflet frontend
 ```
 
-The project currently runs frontend-only. The browser loads GeoJSON files and performs spatial matching with Turf.js.
+The frontend still has a local GeoJSON fallback for development, but the backend is preferred for address search, zoning lookup, and overlay matching.
 
 ## Production Direction
 
-The prototype intentionally avoids a backend for now. Production should later move spatial data and overlay matching to:
+Future production work should include:
 
-- PostgreSQL + PostGIS
-- FastAPI backend
-- Server-side zoning and overlay queries
-- Scheduled CKAN updates
-- Better search and geocoding workflows
-
-This will improve performance and avoid sending large citywide GeoJSON files to every browser.
+- Hosted PostGIS
+- Hosted FastAPI
+- Scheduled CKAN refresh jobs
+- Server-side address search and spatial indexes
+- Better frontend loading states
+- Additional GTA municipalities
 
 ## Disclaimer
 

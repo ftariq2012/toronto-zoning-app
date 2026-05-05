@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bbox } from "@turf/turf";
 import { geoJSON } from "leaflet";
 import {
@@ -9,6 +9,10 @@ import {
   useMap,
 } from "react-leaflet";
 import SearchBar from "./SearchBar.jsx";
+import {
+  getZoningByPoint,
+  searchAddresses,
+} from "../api/zoningApi.js";
 import {
   buildSelectedZoneFromPoint,
   findOverlayMatches,
@@ -92,7 +96,7 @@ export default function MapView({ onSelectZone }) {
   const [zoningData, setZoningData] = useState(null);
   const [overlayData, setOverlayData] = useState({});
   const [addressIndex, setAddressIndex] = useState([]);
-  const [addressStatus, setAddressStatus] = useState("idle");
+  const [addressStatus, setAddressStatus] = useState("ready");
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [loadState, setLoadState] = useState("loading");
   const [overlayLoadState, setOverlayLoadState] = useState("loading");
@@ -176,31 +180,22 @@ export default function MapView({ onSelectZone }) {
     };
   }, []);
 
-  const loadAddressIndex = () => {
-    if (addressStatus !== "idle") {
-      return;
+  const loadAddressIndex = useCallback(async () => {
+    if (addressIndex.length) {
+      return addressIndex;
     }
 
-    setAddressStatus("loading");
-    fetch(ADDRESS_INDEX_URL)
+    const data = await fetch(ADDRESS_INDEX_URL)
       .then((response) => {
         if (!response.ok) {
           throw new Error("Address search data not found.");
         }
         return response.json();
-      })
-      .then((data) => {
-        setAddressIndex(Array.isArray(data) ? data : []);
-        setAddressStatus(Array.isArray(data) && data.length ? "ready" : "missing");
-      })
-      .catch((error) => {
-        console.warn(
-          "Address search data not found. Run the data preparation scripts.",
-          error,
-        );
-        setAddressStatus("missing");
       });
-  };
+    const addresses = Array.isArray(data) ? data : [];
+    setAddressIndex(addresses);
+    return addresses;
+  }, [addressIndex]);
 
   const pointIsNearBounds = (latlng, bounds) => {
     if (!bounds) {
@@ -234,20 +229,47 @@ export default function MapView({ onSelectZone }) {
     return findOverlayMatches(latlng, candidateOverlayData);
   };
 
-  const handleAddressSelect = (address) => {
+  const searchAddressSuggestions = useCallback(async (query) => {
+    try {
+      const response = await searchAddresses(query);
+      setAddressStatus("ready");
+      return response.results ?? [];
+    } catch (error) {
+      console.warn("Backend address search unavailable; using local fallback.", error);
+      try {
+        const addresses = await loadAddressIndex();
+        setAddressStatus("fallback");
+        return addresses
+          .filter((address) => address.search_text?.includes(query.toLowerCase()))
+          .slice(0, 10);
+      } catch (fallbackError) {
+        console.warn("Local address fallback unavailable.", fallbackError);
+        setAddressStatus("missing");
+        return [];
+      }
+    }
+  }, [loadAddressIndex]);
+
+  const handleAddressSelect = async (address) => {
     const point = {
       lat: Number(address.lat),
       lng: Number(address.lng),
     };
-    const selectedResult = buildSelectedZoneFromPoint(
-      point,
-      zoningData,
-      overlayData,
-      address,
-    );
 
     setSelectedAddress(address);
-    onSelectZone(selectedResult);
+    try {
+      const response = await getZoningByPoint(point.lat, point.lng);
+      onSelectZone({
+        ...response,
+        selected_address: address,
+        no_result: !response.found,
+      });
+    } catch (error) {
+      console.warn("Backend zoning lookup unavailable; using local fallback.", error);
+      onSelectZone(
+        buildSelectedZoneFromPoint(point, zoningData, overlayData, address),
+      );
+    }
   };
 
   const onEachFeature = (feature, layer) => {
@@ -255,7 +277,7 @@ export default function MapView({ onSelectZone }) {
     layer.bindTooltip(`Zone ${zoneCode}`, { sticky: true });
 
     layer.on({
-      click: (event) => {
+      click: async (event) => {
         if (selectedLayerRef.current && selectedLayerRef.current !== layer) {
           selectedLayerRef.current.setStyle(baseStyle);
         }
@@ -270,15 +292,25 @@ export default function MapView({ onSelectZone }) {
           lng: event.latlng.lng,
         };
 
-        onSelectZone({
-          main: {
-            properties: feature.properties,
-          },
-          overlays: findIndexedOverlayMatches(clickedPoint),
-          clicked_point: clickedPoint,
-          selected_address: null,
-          no_result: false,
-        });
+        try {
+          const response = await getZoningByPoint(clickedPoint.lat, clickedPoint.lng);
+          onSelectZone({
+            ...response,
+            selected_address: null,
+            no_result: !response.found,
+          });
+        } catch (error) {
+          console.warn("Backend zoning lookup unavailable; using local fallback.", error);
+          onSelectZone({
+            main: {
+              properties: feature.properties,
+            },
+            overlays: findIndexedOverlayMatches(clickedPoint),
+            clicked_point: clickedPoint,
+            selected_address: null,
+            no_result: false,
+          });
+        }
       },
       mouseover: () => {
         if (selectedLayerRef.current !== layer) {
@@ -297,9 +329,8 @@ export default function MapView({ onSelectZone }) {
   return (
     <div className="map-wrap">
       <SearchBar
-        addresses={addressIndex}
         status={addressStatus}
-        onRequestAddresses={loadAddressIndex}
+        onSearchAddresses={searchAddressSuggestions}
         onSelectAddress={handleAddressSelect}
       />
 

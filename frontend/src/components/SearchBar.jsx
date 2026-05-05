@@ -1,26 +1,48 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 
-export default function SearchBar({
-  addresses,
-  status,
-  onRequestAddresses,
-  onSelectAddress,
-}) {
+export default function SearchBar({ status, onSearchAddresses, onSelectAddress }) {
   const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [searchState, setSearchState] = useState("idle");
   const normalizedQuery = query.trim().toLowerCase();
 
-  const suggestions = useMemo(() => {
-    if (normalizedQuery.length < 3 || !addresses?.length) {
-      return [];
+  useEffect(() => {
+    let isCurrent = true;
+
+    if (normalizedQuery.length < 3) {
+      setSuggestions([]);
+      setSearchState("idle");
+      return () => {
+        isCurrent = false;
+      };
     }
 
-    return addresses
-      .filter((address) => address.search_text?.includes(normalizedQuery))
-      .slice(0, 10);
-  }, [addresses, normalizedQuery]);
+    setSearchState("loading");
+    const timeoutId = window.setTimeout(() => {
+      onSearchAddresses(normalizedQuery)
+        .then((results) => {
+          if (isCurrent) {
+            setSuggestions(results.slice(0, 10));
+            setSearchState("ready");
+          }
+        })
+        .catch(() => {
+          if (isCurrent) {
+            setSuggestions([]);
+            setSearchState("error");
+          }
+        });
+    }, 200);
+
+    return () => {
+      isCurrent = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [normalizedQuery, onSearchAddresses]);
 
   const selectAddress = (address) => {
     setQuery(address.address_label);
+    setSuggestions([]);
     onSelectAddress(address);
   };
 
@@ -38,34 +60,30 @@ export default function SearchBar({
         id="address-search"
         type="search"
         value={query}
-        onFocus={onRequestAddresses}
-        onChange={(event) => {
-          onRequestAddresses();
-          setQuery(event.target.value);
-        }}
+        onChange={(event) => setQuery(event.target.value)}
         placeholder="Search a Toronto address"
         autoComplete="off"
       />
-
-      {status === "idle" ? (
-        <p className="search-message">Type at least 3 characters to search.</p>
-      ) : null}
-
-      {status === "missing" ? (
-        <p className="search-message">
-          Address search data not found. Run the data preparation scripts.
-        </p>
-      ) : null}
-
-      {status === "loading" ? (
-        <p className="search-message">Loading address search...</p>
-      ) : null}
 
       {normalizedQuery.length > 0 && normalizedQuery.length < 3 ? (
         <p className="search-message">Keep typing to see address suggestions.</p>
       ) : null}
 
-      {normalizedQuery.length >= 3 && status === "ready" && !suggestions.length ? (
+      {normalizedQuery.length >= 3 && searchState === "loading" ? (
+        <p className="search-message">Searching addresses...</p>
+      ) : null}
+
+      {status === "fallback" ? (
+        <p className="search-message">Backend unavailable. Using local address fallback.</p>
+      ) : null}
+
+      {status === "missing" ? (
+        <p className="search-message">
+          Address search data not found. Load PostGIS or run the data preparation scripts.
+        </p>
+      ) : null}
+
+      {normalizedQuery.length >= 3 && searchState === "ready" && !suggestions.length ? (
         <p className="search-message">No matching addresses found.</p>
       ) : null}
 
