@@ -48,7 +48,7 @@ a {
 
 .search-bar {
   position: absolute;
-  left: 16px;
+  left: 150px;
   top: 16px;
   z-index: 700;
   display: grid;
