@@ -9,7 +9,14 @@ RAW_DATA_DIR = PROJECT_DIR / "data" / "raw"
 
 CKAN_BASE_URL = "https://ckan0.cf.opendata.inter.prod-toronto.ca"
 PACKAGE_SHOW_URL = f"{CKAN_BASE_URL}/api/3/action/package_show"
+PACKAGE_SEARCH_URL = f"{CKAN_BASE_URL}/api/3/action/package_search"
 PACKAGE_ID = "zoning-by-law"
+ADDRESS_PACKAGE_ID = "address-points-municipal-toronto-one-address-repository"
+ADDRESS_SEARCH_TERMS = [
+    "address points municipal",
+    "Toronto One Address Repository",
+    "address points",
+]
 
 TARGET_RESOURCES = {
     "Zoning Area": "zoning_area.geojson",
@@ -52,6 +59,12 @@ def is_geojson_resource(resource: dict) -> bool:
     )
 
 
+def is_address_resource(resource: dict) -> bool:
+    return is_geojson_resource(resource) and "address points" in str(
+        resource.get("name", "")
+    ).lower()
+
+
 def download_file(url: str, output_path: Path) -> None:
     with requests.get(url, stream=True, timeout=120) as response:
         response.raise_for_status()
@@ -78,21 +91,46 @@ def resource_priority(resource: dict) -> tuple[int, int, int]:
     )
 
 
-def main() -> None:
-    RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    package_response = requests.get(
+def get_package(package_id: str) -> dict:
+    response = requests.get(
         PACKAGE_SHOW_URL,
-        params={"id": PACKAGE_ID},
+        params={"id": package_id},
         timeout=60,
     )
-    package_response.raise_for_status()
-    package = package_response.json()
+    response.raise_for_status()
+    package = response.json()
 
     if not package.get("success"):
         raise RuntimeError(f"CKAN package_show failed: {package}")
 
-    resources = package["result"]["resources"]
+    return package["result"]
+
+
+def search_address_packages() -> list[dict]:
+    candidates = []
+    seen_ids = set()
+
+    for query in ADDRESS_SEARCH_TERMS:
+        response = requests.get(
+            PACKAGE_SEARCH_URL,
+            params={"q": query, "rows": 5},
+            timeout=60,
+        )
+        response.raise_for_status()
+        result = response.json()["result"]
+
+        for package in result.get("results", []):
+            package_id = package.get("name")
+            if package_id and package_id not in seen_ids:
+                seen_ids.add(package_id)
+                candidates.append(package)
+
+    return candidates
+
+
+def download_zoning_resources() -> None:
+    package = get_package(PACKAGE_ID)
+    resources = package["resources"]
     candidates_by_filename = {filename: [] for filename in TARGET_RESOURCES.values()}
     downloaded_targets = set()
 
@@ -134,6 +172,58 @@ def main() -> None:
             "Missing target GeoJSON resources from CKAN response: "
             + ", ".join(missing)
         )
+
+
+def download_address_points() -> None:
+    try:
+        package = get_package(ADDRESS_PACKAGE_ID)
+    except Exception as error:
+        print("Could not load known address package.")
+        print(f"Package id tried: {ADDRESS_PACKAGE_ID}")
+        print(f"Error: {error}")
+        print_address_candidates()
+        return
+
+    resources = [
+        resource
+        for resource in package.get("resources", [])
+        if is_address_resource(resource)
+    ]
+
+    if not resources:
+        print("No GeoJSON Address Points resource found in the address package.")
+        print_address_candidates()
+        return
+
+    resource = sorted(resources, key=resource_priority)[0]
+    resource_url = resource.get("url")
+    if not resource_url:
+        print("Address Points resource is missing a URL.")
+        print_address_candidates()
+        return
+
+    output_path = RAW_DATA_DIR / "address_points.geojson"
+    download_file(resource_url, output_path)
+
+    print("-" * 72)
+    print(f"Downloaded: {resource.get('name')}")
+    print(f"URL: {resource_url}")
+    print(f"Output: {output_path}")
+
+
+def print_address_candidates() -> None:
+    print("Address package candidates from CKAN package_search:")
+    try:
+        for package in search_address_packages():
+            print(f"  - {package.get('name')}: {package.get('title')}")
+    except Exception as error:
+        print(f"  Could not search address package candidates: {error}")
+
+
+def main() -> None:
+    RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    download_zoning_resources()
+    download_address_points()
 
 
 if __name__ == "__main__":
