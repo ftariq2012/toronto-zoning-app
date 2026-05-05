@@ -25,19 +25,19 @@ The source files are large, especially `zoning_area.geojson`. Loading full GeoJS
 Project:
 
 ```text
-C:\Users\ftariq\Downloads\toronto-zoning-app
+C:\filepath\toronto-zoning-app
 ```
 
 Raw downloaded data:
 
 ```text
-C:\Users\ftariq\Downloads\toronto-zoning-app\data\raw
+C:\filepath\toronto-zoning-app\data\raw
 ```
 
 Generated frontend data:
 
 ```text
-C:\Users\ftariq\Downloads\toronto-zoning-app\frontend\public\data
+C:\filepath\toronto-zoning-app\frontend\public\data
 ```
 
 ## Download Official Data From Toronto API
@@ -45,8 +45,8 @@ C:\Users\ftariq\Downloads\toronto-zoning-app\frontend\public\data
 From the project root:
 
 ```powershell
-cd C:\Users\ftariq\Downloads\toronto-zoning-app
-C:\Users\ftariq\miniconda3\python.exe .\scripts\download_zoning_from_api.py
+cd C:\filepath\toronto-zoning-app
+C:\filepath\miniconda3\python.exe .\scripts\download_zoning_from_api.py
 ```
 
 The downloader calls the Toronto CKAN `package_show` endpoint for package `zoning-by-law`, filters to GeoJSON resources, and downloads only these target resources:
@@ -68,7 +68,7 @@ The script saves raw files using clean snake_case names in `data/raw`.
 From the project root:
 
 ```powershell
-C:\Users\ftariq\miniconda3\python.exe .\scripts\prepare_all_zoning_data.py
+C:\filepath\miniconda3\python.exe .\scripts\prepare_all_zoning_data.py
 ```
 
 The script reads raw GeoJSON files from `data/raw`, ensures outputs are EPSG:4326, replaces empty values with JSON nulls, and writes cleaned files to `frontend/public/data`.
@@ -106,14 +106,14 @@ Open that URL in your browser.
 Use your Miniconda base Python interpreter:
 
 ```text
-C:\Users\ftariq\miniconda3\python.exe
+C:\filepath\miniconda3\python.exe
 ```
 
 In VS Code:
 
 1. Open the Command Palette.
 2. Run `Python: Select Interpreter`.
-3. Choose `C:\Users\ftariq\miniconda3\python.exe`.
+3. Choose `C:\filepath\miniconda3\python.exe`.
 
 ## How Overlay Matching Works
 
