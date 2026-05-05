@@ -24,3 +24,8 @@ data/raw/
 data/raw/address_points.geojson
 frontend/public/data/address_points_clean.geojson
 frontend/public/data/address_points_index.json
+
+# Environment variables / secrets
+.env
+backend/.env
+frontend/.env
