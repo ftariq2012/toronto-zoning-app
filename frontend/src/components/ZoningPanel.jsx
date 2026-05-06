@@ -4,10 +4,14 @@ import {
   buildPlainEnglishSummary,
   cleanDisplayValue,
   formatLabel,
-  formatParsedZoning,
   formatParkingOverlay,
-  getHeightOverlayText,
-  getZoneName,
+  formatParsedZoning,
+  getDensity,
+  getExceptionNumber,
+  getLotCoverage,
+  getMaxHeight,
+  getParkingZone,
+  getZoneTitle,
   isDisplayableValue,
   parseLotCoverageOverlay,
   parseZoningString,
@@ -25,11 +29,18 @@ const OVERLAY_SECTIONS = [
   ["building_setback", "Building Setback Overlay"],
 ];
 
+function SectionCard({ title, children, className = "" }) {
+  return (
+    <section className={`zoning-section ${className}`}>
+      <h2>{title}</h2>
+      {children}
+    </section>
+  );
+}
+
 function DetailRow({ label, value }) {
   const displayValue = cleanDisplayValue(value);
-  if (!displayValue) {
-    return null;
-  }
+  if (!displayValue) return null;
 
   return (
     <div className="detail-row">
@@ -39,21 +50,21 @@ function DetailRow({ label, value }) {
   );
 }
 
-function Section({ title, children }) {
+function RequirementCard({ label, value }) {
+  const displayValue = cleanDisplayValue(value);
+  if (!displayValue) return null;
+
   return (
-    <section className="panel-section">
-      <h2>{title}</h2>
-      {children}
-    </section>
+    <div className="requirement-card">
+      <span className="requirement-label">{label}</span>
+      <strong className="requirement-value">{displayValue}</strong>
+    </div>
   );
 }
 
-function KeyValueList({ rows }) {
+function DetailList({ rows }) {
   const visibleRows = rows.filter(([, value]) => isDisplayableValue(value));
-
-  if (!visibleRows.length) {
-    return <p className="no-match">No displayable values found.</p>;
-  }
+  if (!visibleRows.length) return null;
 
   return (
     <dl className="detail-list">
@@ -64,77 +75,43 @@ function KeyValueList({ rows }) {
   );
 }
 
-function readableOverlayFacts(overlayKey, properties) {
-  if (overlayKey === "height") {
-    return [getHeightOverlayText(properties)].filter(Boolean);
+function getUsefulOverlayFacts(overlayKey, properties) {
+  if (overlayKey === "parking") {
+    return [formatParkingOverlay(properties)].filter(Boolean);
   }
 
   if (overlayKey === "lot_coverage") {
     return [parseLotCoverageOverlay(properties)].filter(Boolean);
   }
 
-  if (overlayKey === "parking") {
-    return [formatParkingOverlay(properties)].filter(Boolean);
-  }
-
-  return [];
+  return Object.entries(properties ?? {})
+    .filter(([key, value]) => key !== "geometry" && isDisplayableValue(value))
+    .slice(0, 4)
+    .map(([key, value]) => `${formatLabel(key)}: ${cleanDisplayValue(value)}`);
 }
 
-function OverlayMatch({ properties, index, overlayKey }) {
-  const readableFacts = readableOverlayFacts(overlayKey, properties);
-  const entries = Object.entries(properties ?? {}).filter(
-    ([key, value]) => key !== "geometry" && isDisplayableValue(value),
-  );
+function MatchedOverlay({ title, overlayKey, matches }) {
+  const usefulMatches = (matches ?? [])
+    .map((properties) => getUsefulOverlayFacts(overlayKey, properties))
+    .filter((facts) => facts.length);
 
-  if (!entries.length && !readableFacts.length) {
-    return null;
-  }
+  if (!usefulMatches.length) return null;
 
   return (
-    <div className="overlay-match">
-      <h3>Match {index + 1}</h3>
-      {readableFacts.map((fact) => (
-        <p className="readable-fact" key={fact}>
-          {fact}
-        </p>
+    <div className="overlay-section">
+      <h3>{title}</h3>
+      {usefulMatches.map((facts, index) => (
+        <ul className="overlay-facts" key={`${title}-${index}`}>
+          {facts.map((fact) => (
+            <li key={fact}>{fact}</li>
+          ))}
+        </ul>
       ))}
-      {entries.length ? (
-        <details className="mini-details">
-          <summary>Raw matched fields</summary>
-          <RawProperties properties={properties} />
-        </details>
-      ) : null}
     </div>
   );
 }
 
-function OverlaySection({ title, matches, overlayKey }) {
-  const visibleMatches = (matches ?? []).filter((properties) =>
-    Object.entries(properties ?? {}).some(
-      ([key, value]) => key !== "geometry" && isDisplayableValue(value),
-    ),
-  );
-
-  return (
-    <section className="overlay-section">
-      <h3>{title}</h3>
-      {visibleMatches.length ? (
-        visibleMatches.map((properties, index) => (
-          <OverlayMatch
-            key={`${title}-${index}`}
-            properties={properties}
-            index={index}
-            overlayKey={overlayKey}
-          />
-        ))
-      ) : (
-        <p className="no-match">No matching overlay found.</p>
-      )}
-    </section>
-  );
-}
-
-function AdvancedRawDetails({ mainProperties, overlays }) {
+function AdvancedRawData({ mainProperties, overlays }) {
   return (
     <details className="advanced-details">
       <summary>Advanced raw data</summary>
@@ -186,149 +163,6 @@ function RawProperties({ properties, title }) {
   );
 }
 
-function EmptyPanel() {
-  return (
-    <div className="empty-state">
-      <p>
-        Search a Toronto address or click a zoning polygon to combine the main
-        zoning record with matching zoning overlays at that point.
-      </p>
-
-      <section className="start-guide">
-        <h2>Main zoning area</h2>
-        <ul>
-          <li>Plain-English zoning summary</li>
-          <li>Readable zone name and raw zone code</li>
-          <li>Parsed density, frontage, lot area, units, and exceptions</li>
-          <li>By-law chapter, section, and exception reference</li>
-        </ul>
-      </section>
-
-      <section className="start-guide">
-        <h2>Overlay data checked</h2>
-        <ul>
-          <li>Height Overlay, including maximum permitted height</li>
-          <li>Lot Coverage Overlay, including maximum lot coverage</li>
-          <li>Parking Zone Overlay</li>
-          <li>Policy Area and Policy Road overlays</li>
-          <li>Priority Retail Street and Rooming House overlays</li>
-          <li>Building Setback Overlay</li>
-        </ul>
-      </section>
-    </div>
-  );
-}
-
-export default function ZoningPanel({ zone }) {
-  const properties = zone?.main?.properties;
-  const parsedZoning = parseZoningString(properties?.zone_string);
-  const parsedRows = formatParsedZoning(parsedZoning);
-  const zoneCode = cleanDisplayValue(properties?.zone_code || parsedZoning.zoneCode);
-  const zoneName = getZoneName(zoneCode);
-  const summary = properties
-    ? buildPlainEnglishSummary(properties, zone?.overlays ?? {})
-    : "";
-
-  return (
-    <aside className="zoning-panel" aria-label="Selected zoning details">
-      <div className="panel-header">
-        <p className="eyebrow">Toronto zoning lookup</p>
-        <h1>{zoneCode ? `${zoneCode} - ${zoneName}` : "Select a location"}</h1>
-      </div>
-
-      {zone?.selected_address ? (
-        <div className="selected-address">
-          Selected address: {zone.selected_address.address_label}
-        </div>
-      ) : null}
-
-      {zone?.no_result ? (
-        <>
-          <Section title="No zoning polygon found">
-            <p className="no-result">
-              No zoning polygon was found for this address point. Try another
-              nearby address or click the map directly.
-            </p>
-          </Section>
-          <SharedFooter />
-        </>
-      ) : properties ? (
-        <>
-          <Section title="Plain-English Summary">
-            <div className="summary-box">
-              <p>{summary}</p>
-            </div>
-          </Section>
-
-          <Section title="Main Zoning">
-            <KeyValueList
-              rows={[
-                ["Zone code", zoneCode ? `${zoneCode} - ${zoneName}` : ""],
-                ["Full zoning string", properties.zone_string],
-              ]}
-            />
-          </Section>
-
-          <Section title="Parsed Zoning Rules">
-            <KeyValueList rows={parsedRows} />
-          </Section>
-
-          <Section title="Lot/Building Standards">
-            <KeyValueList
-              rows={[
-                ["Minimum frontage field", properties.frontage ? `${properties.frontage} m` : ""],
-                ["Minimum lot area field", properties.lot_area ? `${properties.lot_area} m²` : ""],
-                ["Coverage", properties.coverage],
-              ]}
-            />
-          </Section>
-
-          <Section title="Overlays">
-            <div className="overlay-sections">
-              {OVERLAY_SECTIONS.map(([key, title]) => (
-                <OverlaySection
-                  key={key}
-                  title={title}
-                  overlayKey={key}
-                  matches={zone.overlays?.[key]}
-                />
-              ))}
-            </div>
-          </Section>
-
-          <Section title="By-law References">
-            <KeyValueList
-              rows={[
-                ["By-law chapter", properties.bylaw_chapter],
-                ["By-law section", properties.bylaw_section],
-                ["Exception number", parsedZoning.exceptionNumber || properties.exception_number],
-                ["Exception reference", properties.exception_reference],
-              ]}
-            />
-          </Section>
-
-          <div className="clicked-point">
-            Selected point: {zone.clicked_point.lat.toFixed(6)},{" "}
-            {zone.clicked_point.lng.toFixed(6)}
-          </div>
-
-          <AdvancedRawDetails
-            mainProperties={properties}
-            overlays={zone.overlays}
-          />
-
-          <SharedFooter />
-        </>
-      ) : (
-        <>
-          <EmptyPanel />
-          <SharedFooter />
-        </>
-      )}
-    </aside>
-  );
-}
-
 function SharedFooter() {
   return (
     <>
@@ -340,5 +174,167 @@ function SharedFooter() {
       </div>
       <Disclaimer />
     </>
+  );
+}
+
+function EmptyPanel() {
+  return (
+    <div className="empty-state">
+      <p>
+        Search a Toronto address or click a zoning polygon to see zoning
+        requirements, overlays, by-law references, and raw data.
+      </p>
+    </div>
+  );
+}
+
+export default function ZoningPanel({ zone }) {
+  const properties = zone?.main?.properties;
+
+  if (zone?.no_result) {
+    return (
+      <aside className="zoning-panel" aria-label="Selected zoning details">
+        <div className="panel-header">
+          <p className="eyebrow">Toronto zoning lookup</p>
+          <h1 className="zoning-title">No zoning polygon found</h1>
+        </div>
+        {zone.selected_address ? (
+          <div className="selected-address">
+            Selected address: {zone.selected_address.address_label}
+          </div>
+        ) : null}
+        <SectionCard title="Result">
+          <p className="no-result">
+            No zoning polygon was found for this point. Try another address or
+            click a nearby zoning polygon.
+          </p>
+        </SectionCard>
+        <SharedFooter />
+      </aside>
+    );
+  }
+
+  if (!properties) {
+    return (
+      <aside className="zoning-panel" aria-label="Selected zoning details">
+        <div className="panel-header">
+          <p className="eyebrow">Toronto zoning lookup</p>
+          <h1 className="zoning-title">Select a location</h1>
+        </div>
+        <EmptyPanel />
+        <SharedFooter />
+      </aside>
+    );
+  }
+
+  const overlays = zone?.overlays ?? {};
+  const parsed = parseZoningString(properties.zone_string);
+  const zoneTitle = getZoneTitle(properties);
+  const density = getDensity(properties);
+  const maxHeight = getMaxHeight(overlays);
+  const parkingZone = getParkingZone(overlays);
+  const exceptionNumber = getExceptionNumber(properties);
+  const lotCoverage = getLotCoverage(overlays);
+  const parkingDisplay = parkingZone
+    ? parkingZone.toLowerCase().startsWith("zone")
+      ? parkingZone
+      : `Zone ${parkingZone}`
+    : "";
+  const parsedRows = formatParsedZoning(parsed);
+  const lotRows = [
+    ["Minimum lot area", parsed.lotArea ? `${parsed.lotArea} m²` : ""],
+    ["Lot area field", properties.lot_area ? `${properties.lot_area} m²` : ""],
+    ["Minimum frontage", parsed.frontage ? `${parsed.frontage} m` : ""],
+    ["Frontage field", properties.frontage ? `${properties.frontage} m` : ""],
+    ["Coverage", properties.coverage],
+    ["Lot coverage", lotCoverage ? `${lotCoverage}%` : ""],
+  ];
+  const bylawRows = [
+    ["Chapter", properties.bylaw_chapter],
+    ["Section", properties.bylaw_section],
+    ["Exception reference", properties.exception_reference],
+  ];
+  const hasParsedRows = parsedRows.some(([, value]) => isDisplayableValue(value));
+  const hasLotRows = lotRows.some(([, value]) => isDisplayableValue(value));
+  const hasBylawRows = bylawRows.some(([, value]) => isDisplayableValue(value));
+  const hasMatchedOverlay = OVERLAY_SECTIONS.some(([key]) =>
+    (overlays[key] ?? []).some(
+      (item) => getUsefulOverlayFacts(key, item).length > 0,
+    ),
+  );
+
+  return (
+    <aside className="zoning-panel" aria-label="Selected zoning details">
+      <div className="panel-header">
+        <p className="eyebrow">Toronto zoning lookup</p>
+        <h1 className="zoning-title">{zoneTitle}</h1>
+      </div>
+
+      {zone?.selected_address ? (
+        <div className="selected-address">
+          Selected address: {zone.selected_address.address_label}
+        </div>
+      ) : null}
+
+      <section className="zoning-summary-card">
+        <h2>Summary</h2>
+        <p>{buildPlainEnglishSummary(properties, overlays)}</p>
+      </section>
+
+      <SectionCard title="Key Requirements / Development Snapshot">
+        <div className="requirements-grid">
+          <RequirementCard label="Zone" value={zoneTitle} />
+          <RequirementCard label="Density" value={density ? `${density} FSI` : ""} />
+          <RequirementCard
+            label="Maximum Height"
+            value={maxHeight ? `${maxHeight} m` : ""}
+          />
+          <RequirementCard
+            label="Parking Zone"
+            value={parkingDisplay}
+          />
+          <RequirementCard
+            label="Site-specific Exception"
+            value={exceptionNumber}
+          />
+        </div>
+      </SectionCard>
+
+      {hasParsedRows ? (
+        <SectionCard title="Parsed Zoning Rules">
+          <DetailList rows={parsedRows} />
+        </SectionCard>
+      ) : null}
+
+      {hasLotRows ? (
+        <SectionCard title="Lot / Building Standards">
+          <DetailList rows={lotRows} />
+        </SectionCard>
+      ) : null}
+
+      {hasBylawRows ? (
+        <SectionCard title="By-law References">
+          <DetailList rows={bylawRows} />
+        </SectionCard>
+      ) : null}
+
+      {hasMatchedOverlay ? (
+        <SectionCard title="Matched Overlays">
+          <div className="overlay-sections">
+            {OVERLAY_SECTIONS.map(([key, title]) => (
+              <MatchedOverlay
+                key={key}
+                title={title}
+                overlayKey={key}
+                matches={overlays[key]}
+              />
+            ))}
+          </div>
+        </SectionCard>
+      ) : null}
+
+      <AdvancedRawData mainProperties={properties} overlays={overlays} />
+      <SharedFooter />
+    </aside>
   );
 }

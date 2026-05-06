@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { bbox } from "@turf/turf";
-import { geoJSON } from "leaflet";
+import { bbox, centroid } from "@turf/turf";
+import { divIcon, geoJSON } from "leaflet";
 import {
-  CircleMarker,
   GeoJSON,
   MapContainer,
+  Marker,
+  Popup,
+  Tooltip,
   TileLayer,
   useMap,
 } from "react-leaflet";
@@ -17,6 +19,10 @@ import {
   buildSelectedZoneFromPoint,
   findOverlayMatches,
 } from "../utils/spatialMatching.js";
+import {
+  cleanDisplayValue,
+  doesFeatureMatchFilters,
+} from "../utils/zoningFormatters.js";
 
 const TORONTO_CENTER = [43.6532, -79.3832];
 const MAIN_DATA_URL = "/data/zoning_area_clean.geojson";
@@ -61,6 +67,38 @@ const selectedStyle = {
   weight: 3,
 };
 
+const filterMatchStyle = {
+  color: "#0f766e",
+  fillColor: "#14b8a6",
+  fillOpacity: 0.38,
+  opacity: 1,
+  weight: 2,
+};
+
+const filterDimStyle = {
+  color: "#94a3b8",
+  fillColor: "#cbd5e1",
+  fillOpacity: 0.04,
+  opacity: 0.28,
+  weight: 1,
+};
+
+const addressIcon = divIcon({
+  className: "address-pin",
+  html: '<span></span>',
+  iconSize: [26, 34],
+  iconAnchor: [13, 34],
+  popupAnchor: [0, -30],
+});
+
+const EMPTY_FILTERS = {
+  zone: "",
+  minDensity: "",
+  minHeight: "",
+  parkingZone: "",
+  hasException: false,
+};
+
 function FitBounds({ data }) {
   const map = useMap();
 
@@ -100,6 +138,8 @@ export default function MapView({ onSelectZone }) {
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [loadState, setLoadState] = useState("loading");
   const [overlayLoadState, setOverlayLoadState] = useState("loading");
+  const [filterDraft, setFilterDraft] = useState(EMPTY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
   const selectedLayerRef = useRef(null);
 
   const indexedOverlayData = useMemo(() => {
@@ -229,6 +269,54 @@ export default function MapView({ onSelectZone }) {
     return findOverlayMatches(latlng, candidateOverlayData);
   };
 
+  const activeFilters = useMemo(
+    () =>
+      Boolean(
+        cleanDisplayValue(appliedFilters.zone) ||
+          cleanDisplayValue(appliedFilters.minDensity) ||
+          cleanDisplayValue(appliedFilters.minHeight) ||
+          cleanDisplayValue(appliedFilters.parkingZone) ||
+          appliedFilters.hasException,
+      ),
+    [appliedFilters],
+  );
+
+  const filteredFeatures = useMemo(() => {
+    if (!activeFilters || !zoningData?.features?.length) {
+      return null;
+    }
+
+    return zoningData.features.filter((feature) => {
+      const [lng, lat] = centroid(feature).geometry.coordinates;
+      const overlayMatches = findIndexedOverlayMatches({ lat, lng });
+      return doesFeatureMatchFilters(feature, appliedFilters, overlayMatches);
+    });
+  }, [activeFilters, appliedFilters, indexedOverlayData, zoningData]);
+
+  const filteredFeatureSet = useMemo(
+    () => (filteredFeatures ? new Set(filteredFeatures) : null),
+    [filteredFeatures],
+  );
+
+  const styleForFeature = useCallback(
+    (feature) => {
+      if (!activeFilters) {
+        return baseStyle;
+      }
+      return filteredFeatureSet?.has(feature) ? filterMatchStyle : filterDimStyle;
+    },
+    [activeFilters, filteredFeatureSet],
+  );
+
+  const applyFilters = () => {
+    setAppliedFilters(filterDraft);
+  };
+
+  const clearFilters = () => {
+    setFilterDraft(EMPTY_FILTERS);
+    setAppliedFilters(EMPTY_FILTERS);
+  };
+
   const searchAddressSuggestions = useCallback(async (query) => {
     try {
       const response = await searchAddresses(query);
@@ -270,6 +358,10 @@ export default function MapView({ onSelectZone }) {
         buildSelectedZoneFromPoint(point, zoningData, overlayData, address),
       );
     }
+  };
+
+  const clearAddressSearch = () => {
+    setSelectedAddress(null);
   };
 
   const onEachFeature = (feature, layer) => {
@@ -320,7 +412,7 @@ export default function MapView({ onSelectZone }) {
       },
       mouseout: () => {
         layer.setStyle(
-          selectedLayerRef.current === layer ? selectedStyle : baseStyle,
+          selectedLayerRef.current === layer ? selectedStyle : styleForFeature(feature),
         );
       },
     });
@@ -332,7 +424,100 @@ export default function MapView({ onSelectZone }) {
         status={addressStatus}
         onSearchAddresses={searchAddressSuggestions}
         onSelectAddress={handleAddressSelect}
+        onClearSearch={clearAddressSearch}
       />
+      <div className="feature-filter-panel">
+        <details>
+          <summary>Filter by Zoning Features</summary>
+          <div className="filter-content">
+            <label className="filter-row">
+              <span>Zone code/category</span>
+              <input
+                value={filterDraft.zone}
+                onChange={(event) =>
+                  setFilterDraft({ ...filterDraft, zone: event.target.value })
+                }
+                placeholder="R, RD, Residential"
+              />
+            </label>
+            <label className="filter-row">
+              <span>Minimum density</span>
+              <input
+                type="number"
+                step="0.1"
+                value={filterDraft.minDensity}
+                onChange={(event) =>
+                  setFilterDraft({
+                    ...filterDraft,
+                    minDensity: event.target.value,
+                  })
+                }
+                placeholder="0.6"
+              />
+            </label>
+            <label className="filter-row">
+              <span>Minimum height</span>
+              <input
+                type="number"
+                step="0.1"
+                value={filterDraft.minHeight}
+                onChange={(event) =>
+                  setFilterDraft({
+                    ...filterDraft,
+                    minHeight: event.target.value,
+                  })
+                }
+                placeholder="11"
+              />
+            </label>
+            <label className="filter-row">
+              <span>Parking zone</span>
+              <input
+                value={filterDraft.parkingZone}
+                onChange={(event) =>
+                  setFilterDraft({
+                    ...filterDraft,
+                    parkingZone: event.target.value,
+                  })
+                }
+                placeholder="A, B, C"
+              />
+            </label>
+            <label className="filter-toggle">
+              <input
+                type="checkbox"
+                checked={filterDraft.hasException}
+                onChange={(event) =>
+                  setFilterDraft({
+                    ...filterDraft,
+                    hasException: event.target.checked,
+                  })
+                }
+              />
+              <span>Has site-specific exception</span>
+            </label>
+            <div className="filter-actions">
+              <button type="button" onClick={applyFilters}>
+                Apply Filters
+              </button>
+              <button type="button" onClick={clearFilters}>
+                Clear Filters
+              </button>
+            </div>
+            {activeFilters ? (
+              filteredFeatures?.length ? (
+                <p className="result-count">
+                  {filteredFeatures.length} matching zones found.
+                </p>
+              ) : (
+                <p className="no-results-message">
+                  No matching zoning areas found for these filters.
+                </p>
+              )
+            ) : null}
+          </div>
+        </details>
+      </div>
 
       <MapContainer
         center={TORONTO_CENTER}
@@ -350,9 +535,9 @@ export default function MapView({ onSelectZone }) {
           <>
             <FitBounds data={zoningData} />
             <GeoJSON
-              key="zoning-layer"
+              key={`zoning-layer-${JSON.stringify(appliedFilters)}`}
               data={zoningData}
-              style={baseStyle}
+              style={styleForFeature}
               onEachFeature={onEachFeature}
             />
           </>
@@ -360,16 +545,15 @@ export default function MapView({ onSelectZone }) {
 
         <AddressMapController selectedAddress={selectedAddress} />
         {selectedAddress ? (
-          <CircleMarker
-            center={[selectedAddress.lat, selectedAddress.lng]}
-            radius={7}
-            pathOptions={{
-              color: "#991b1b",
-              fillColor: "#ef4444",
-              fillOpacity: 0.9,
-              weight: 2,
-            }}
-          />
+          <Marker
+            position={[selectedAddress.lat, selectedAddress.lng]}
+            icon={addressIcon}
+          >
+            <Popup>{selectedAddress.address_label}</Popup>
+            <Tooltip direction="top" offset={[0, -30]} permanent>
+              {selectedAddress.address_label}
+            </Tooltip>
+          </Marker>
         ) : null}
       </MapContainer>
 

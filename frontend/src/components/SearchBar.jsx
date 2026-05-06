@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
 
-export default function SearchBar({ status, onSearchAddresses, onSelectAddress }) {
+export default function SearchBar({
+  status,
+  onSearchAddresses,
+  onSelectAddress,
+  onClearSearch,
+}) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [searchState, setSearchState] = useState("idle");
@@ -53,6 +58,13 @@ export default function SearchBar({ status, onSearchAddresses, onSelectAddress }
     }
   };
 
+  const clearSearch = () => {
+    setQuery("");
+    setSuggestions([]);
+    setSearchState("idle");
+    onClearSearch();
+  };
+
   return (
     <form className="search-bar" onSubmit={handleSubmit}>
       <label htmlFor="address-search">Address search</label>
@@ -64,6 +76,12 @@ export default function SearchBar({ status, onSearchAddresses, onSelectAddress }
         placeholder="Search a Toronto address"
         autoComplete="off"
       />
+
+      {query ? (
+        <button className="search-clear" type="button" onClick={clearSearch}>
+          Clear search
+        </button>
+      ) : null}
 
       {normalizedQuery.length > 0 && normalizedQuery.length < 3 ? (
         <p className="search-message">Keep typing to see address suggestions.</p>

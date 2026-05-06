@@ -41,6 +41,16 @@ export function isDisplayableValue(value) {
   return cleanDisplayValue(value) !== "";
 }
 
+export function parseDisplayNumber(value) {
+  const cleaned = cleanDisplayValue(value);
+  if (!cleaned) {
+    return null;
+  }
+
+  const match = cleaned.match(/-?\d+(\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
 export function getZoneName(zoneCode) {
   const cleanZoneCode = cleanDisplayValue(zoneCode).toUpperCase();
   if (!cleanZoneCode) {
@@ -176,41 +186,125 @@ export function formatParkingOverlay(properties = {}) {
   return parkingZone ? `Parking zone: ${parkingZone}` : "";
 }
 
-export function buildPlainEnglishSummary(mainProperties = {}, overlays = {}) {
+export function getDensity(mainProperties = {}) {
+  const parsed = parseZoningString(mainProperties.zone_string);
+  return cleanDisplayValue(parsed.density);
+}
+
+export function getExceptionNumber(mainProperties = {}) {
+  const parsed = parseZoningString(mainProperties.zone_string);
+  return (
+    cleanDisplayValue(parsed.exceptionNumber) ||
+    cleanDisplayValue(mainProperties.exception_number)
+  );
+}
+
+export function getMaxHeight(overlays = {}) {
+  for (const properties of overlays.height ?? []) {
+    const parsed = parseHeightOverlay(properties);
+    if (parsed.height) {
+      return parsed.height;
+    }
+  }
+  return "";
+}
+
+export function getParkingZone(overlays = {}) {
+  for (const properties of overlays.parking ?? []) {
+    const parkingZone =
+      cleanDisplayValue(properties.parking_zone) ||
+      cleanDisplayValue(properties.ZN_PARKZONE);
+    if (parkingZone) {
+      return parkingZone;
+    }
+  }
+  return "";
+}
+
+export function getLotCoverage(overlays = {}) {
+  for (const properties of overlays.lot_coverage ?? []) {
+    const text = parseLotCoverageOverlay(properties);
+    const value = parseDisplayNumber(text);
+    if (value !== null) {
+      return String(value);
+    }
+  }
+  return "";
+}
+
+export function getZoneTitle(mainProperties = {}) {
   const parsed = parseZoningString(mainProperties.zone_string);
   const zoneCode = cleanDisplayValue(mainProperties.zone_code || parsed.zoneCode);
-  const zoneName = getZoneName(zoneCode) || "this zoning area";
+  const zoneName = getZoneName(zoneCode);
+  return zoneCode ? `${zoneCode} - ${zoneName}` : "";
+}
+
+export function doesFeatureMatchFilters(feature, filters = {}, overlayMatches = {}) {
+  const properties = feature?.properties ?? {};
+  const parsed = parseZoningString(properties.zone_string);
+  const zoneCode = cleanDisplayValue(properties.zone_code || parsed.zoneCode);
+  const zoneName = getZoneName(zoneCode);
+  const zoneQuery = cleanDisplayValue(filters.zone).toLowerCase();
+
+  if (
+    zoneQuery &&
+    !zoneCode.toLowerCase().includes(zoneQuery) &&
+    !zoneName.toLowerCase().includes(zoneQuery)
+  ) {
+    return false;
+  }
+
+  const minDensity = parseDisplayNumber(filters.minDensity);
+  if (minDensity !== null) {
+    const density = parseDisplayNumber(parsed.density);
+    if (density === null || density < minDensity) {
+      return false;
+    }
+  }
+
+  const minHeight = parseDisplayNumber(filters.minHeight);
+  if (minHeight !== null) {
+    const height = parseDisplayNumber(getMaxHeight(overlayMatches));
+    if (height === null || height < minHeight) {
+      return false;
+    }
+  }
+
+  const parkingQuery = cleanDisplayValue(filters.parkingZone).toLowerCase();
+  if (parkingQuery) {
+    const parkingZone = getParkingZone(overlayMatches).toLowerCase();
+    if (!parkingZone || !parkingZone.includes(parkingQuery)) {
+      return false;
+    }
+  }
+
+  if (filters.hasException && !getExceptionNumber(properties)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function buildPlainEnglishSummary(mainProperties = {}, overlays = {}) {
+  const zoneName = getZoneName(mainProperties.zone_code) || "this zoning area";
   const facts = [];
-  const heightText = (overlays.height ?? []).map(getHeightOverlayText).find(Boolean);
-  const lotCoverageText = (overlays.lot_coverage ?? [])
-    .map(parseLotCoverageOverlay)
-    .find(Boolean);
+  const density = getDensity(mainProperties);
+  const height = getMaxHeight(overlays);
+  const parkingZone = getParkingZone(overlays);
+  const exceptionNumber = getExceptionNumber(mainProperties);
+  const lotCoverage = getLotCoverage(overlays);
 
-  if (parsed.density) {
-    facts.push(`density ${parsed.density} FSI`);
-  }
-  if (parsed.frontage) {
-    facts.push(`minimum frontage ${parsed.frontage} m`);
-  }
-  if (parsed.lotArea) {
-    facts.push(`minimum lot area ${parsed.lotArea} m²`);
-  }
-  if (parsed.exceptionNumber) {
-    facts.push(`site-specific exception ${parsed.exceptionNumber}`);
-  }
-  if (parsed.siteSpecificPolicy) {
-    facts.push(`standards set ${parsed.siteSpecificPolicy}`);
-  }
+  if (density) facts.push(`density ${density} FSI`);
+  if (height) facts.push(`maximum permitted height ${height} m`);
+  if (parkingZone) facts.push(`parking zone ${parkingZone}`);
+  if (lotCoverage) facts.push(`maximum lot coverage ${lotCoverage}%`);
+  if (exceptionNumber) facts.push(`site-specific exception ${exceptionNumber}`);
 
-  const zoningSentence = facts.length
-    ? ` The zoning string indicates ${facts.join(", ")}.`
-    : "";
-  const heightSentence = heightText ? ` The height overlay indicates ${heightText.toLowerCase()}.` : "";
-  const lotCoverageSentence = lotCoverageText
-    ? ` The lot coverage overlay indicates ${lotCoverageText.toLowerCase()}.`
+  const factSentence = facts.length
+    ? ` Available zoning data indicates ${facts.join(", ")}.`
     : "";
 
-  return `This area is zoned ${zoneName}${zoneCode ? ` (${zoneCode})` : ""}.${zoningSentence}${heightSentence}${lotCoverageSentence} Always verify official zoning details with the City of Toronto.`;
+  return `This area is zoned ${zoneName}.${factSentence}`;
 }
 
 export function formatLabel(key) {
