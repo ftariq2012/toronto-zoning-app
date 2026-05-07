@@ -1,7 +1,6 @@
 import React from "react";
 import Disclaimer from "./Disclaimer.jsx";
 import {
-  buildPlainEnglishSummary,
   cleanDisplayValue,
   formatLabel,
   formatParkingOverlay,
@@ -16,6 +15,12 @@ import {
   parseLotCoverageOverlay,
   parseZoningString,
 } from "../utils/zoningFormatters.js";
+import {
+  buildMunicipalitySummary,
+  getNormalizedZoneTitle,
+  normalizeZoningFeature,
+} from "../utils/municipalityNormalizers.js";
+import { getMunicipalityConfig } from "../config/municipalities.js";
 
 const SOURCE_URL = "https://open.toronto.ca/dataset/zoning-by-law/";
 const OVERLAY_SECTIONS = [
@@ -27,6 +32,13 @@ const OVERLAY_SECTIONS = [
   ["rooming_house", "Rooming House Overlay"],
   ["lot_coverage", "Lot Coverage Overlay"],
   ["building_setback", "Building Setback Overlay"],
+];
+const BRAMPTON_OVERLAY_SECTIONS = [
+  ["height", "Height Schedule Overlay"],
+  ["density", "Density / FSI Schedule Overlay"],
+  ["lot_width", "Lot Width Schedule Overlay"],
+  ["parking", "Parking Regulation Area Overlay"],
+  ["driveway", "Driveway Regulation Overlay"],
 ];
 
 function SectionCard({ title, children, className = "" }) {
@@ -76,8 +88,36 @@ function DetailList({ rows }) {
 }
 
 function getUsefulOverlayFacts(overlayKey, properties) {
+  if (overlayKey === "height") {
+    const value = cleanDisplayValue(properties?.HEIGHT_MAX_ST);
+    if (value) return [`Maximum height: ${value} storeys`];
+  }
+
+  if (overlayKey === "density") {
+    const value = cleanDisplayValue(properties?.DENSITY_MAX_FSI);
+    if (value) return [`Density / FSI: ${value} FSI`];
+  }
+
+  if (overlayKey === "lot_width") {
+    const value = cleanDisplayValue(properties?.LOT_WIDTH);
+    if (value) return [`Lot width: ${value} m`];
+  }
+
+  if (overlayKey === "driveway") {
+    const value =
+      cleanDisplayValue(properties?.DRIVEWAY_REGULATION) ||
+      cleanDisplayValue(properties?.DRIVEWAY) ||
+      cleanDisplayValue(properties?.REGULATION);
+    if (value) return [`Driveway regulation: ${value}`];
+  }
+
   if (overlayKey === "parking") {
-    return [formatParkingOverlay(properties)].filter(Boolean);
+    const bramptonParking = cleanDisplayValue(properties?.PRA);
+    return [
+      bramptonParking
+        ? `Parking regulation area: ${bramptonParking}`
+        : formatParkingOverlay(properties),
+    ].filter(Boolean);
   }
 
   if (overlayKey === "lot_coverage") {
@@ -111,7 +151,10 @@ function MatchedOverlay({ title, overlayKey, matches }) {
   );
 }
 
-function AdvancedRawData({ mainProperties, overlays }) {
+function AdvancedRawData({ mainProperties, overlays, municipalityId }) {
+  const overlayEntries = Object.entries(overlays ?? {});
+  const shouldShowTorontoOverlayNotes = municipalityId === "toronto";
+
   return (
     <details className="advanced-details">
       <summary>Advanced raw data</summary>
@@ -119,22 +162,37 @@ function AdvancedRawData({ mainProperties, overlays }) {
         <h3>Main zoning raw fields</h3>
         <RawProperties properties={mainProperties} />
       </div>
-      {OVERLAY_SECTIONS.map(([key, title]) => (
-        <div className="advanced-section" key={key}>
-          <h3>{title}</h3>
-          {(overlays?.[key] ?? []).length ? (
-            overlays[key].map((properties, index) => (
-              <RawProperties
-                key={`${key}-${index}`}
-                title={`Match ${index + 1}`}
-                properties={properties}
-              />
-            ))
-          ) : (
-            <p className="no-match">No matching overlay found.</p>
+      {shouldShowTorontoOverlayNotes
+        ? OVERLAY_SECTIONS.map(([key, title]) => (
+            <div className="advanced-section" key={key}>
+              <h3>{title}</h3>
+              {(overlays?.[key] ?? []).length ? (
+                overlays[key].map((properties, index) => (
+                  <RawProperties
+                    key={`${key}-${index}`}
+                    title={`Match ${index + 1}`}
+                    properties={properties}
+                  />
+                ))
+              ) : (
+                <p className="no-match">No matching overlay found.</p>
+              )}
+            </div>
+          ))
+        : overlayEntries.map(([key, matches]) =>
+            matches?.length ? (
+              <div className="advanced-section" key={key}>
+                <h3>{formatLabel(key)}</h3>
+                {matches.map((properties, index) => (
+                  <RawProperties
+                    key={`${key}-${index}`}
+                    title={`Match ${index + 1}`}
+                    properties={properties}
+                  />
+                ))}
+              </div>
+            ) : null,
           )}
-        </div>
-      ))}
     </details>
   );
 }
@@ -163,39 +221,41 @@ function RawProperties({ properties, title }) {
   );
 }
 
-function SharedFooter() {
+function SharedFooter({ municipalityName, sourceName, sourceUrl }) {
   return (
     <>
       <div className="source-box">
         <span>Source</span>
-        <a href={SOURCE_URL} target="_blank" rel="noreferrer">
-          City of Toronto Zoning By-law Open Data
+        <a href={sourceUrl || SOURCE_URL} target="_blank" rel="noreferrer">
+          {sourceName || "City of Toronto Zoning By-law Open Data"}
         </a>
       </div>
-      <Disclaimer />
+      <Disclaimer municipalityName={municipalityName} />
     </>
   );
 }
 
-function EmptyPanel() {
+function EmptyPanel({ municipalityName }) {
   return (
     <div className="empty-state">
       <p>
-        Search a Toronto address or click a zoning polygon to see zoning
+        Search a {municipalityName} address or click a zoning polygon to see zoning
         requirements, overlays, by-law references, and raw data.
       </p>
     </div>
   );
 }
 
-export default function ZoningPanel({ zone }) {
+export default function ZoningPanel({ zone, selectedMunicipality = "toronto" }) {
+  const municipalityId = zone?.municipality_id ?? selectedMunicipality;
+  const municipality = getMunicipalityConfig(municipalityId);
   const properties = zone?.main?.properties;
 
   if (zone?.no_result) {
     return (
       <aside className="zoning-panel" aria-label="Selected zoning details">
         <div className="panel-header">
-          <p className="eyebrow">Toronto zoning lookup</p>
+          <p className="eyebrow">{municipality.name} zoning lookup</p>
           <h1 className="zoning-title">No zoning polygon found</h1>
         </div>
         {zone.selected_address ? (
@@ -205,11 +265,15 @@ export default function ZoningPanel({ zone }) {
         ) : null}
         <SectionCard title="Result">
           <p className="no-result">
-            No zoning polygon was found for this point. Try another address or
-            click a nearby zoning polygon.
+            {zone.message ||
+              "No zoning polygon was found for this point. Try another address or click a nearby zoning polygon."}
           </p>
         </SectionCard>
-        <SharedFooter />
+        <SharedFooter
+          municipalityName={municipality.name}
+          sourceName={municipality.sourceName}
+          sourceUrl={municipality.sourceUrl}
+        />
       </aside>
     );
   }
@@ -218,25 +282,35 @@ export default function ZoningPanel({ zone }) {
     return (
       <aside className="zoning-panel" aria-label="Selected zoning details">
         <div className="panel-header">
-          <p className="eyebrow">Toronto zoning lookup</p>
+          <p className="eyebrow">{municipality.name} zoning lookup</p>
           <h1 className="zoning-title">Select a location</h1>
         </div>
-        <EmptyPanel />
-        <SharedFooter />
+        <EmptyPanel municipalityName={municipality.name} />
+        <SharedFooter
+          municipalityName={municipality.name}
+          sourceName={municipality.sourceName}
+          sourceUrl={municipality.sourceUrl}
+        />
       </aside>
     );
   }
 
   const overlays = zone?.overlays ?? {};
+  const normalized = normalizeZoningFeature(zone, municipalityId);
   const parsed = parseZoningString(properties.zone_string);
-  const zoneTitle = getZoneTitle(properties);
-  const density = getDensity(properties);
-  const maxHeight = getMaxHeight(overlays);
-  const parkingZone = getParkingZone(overlays);
-  const exceptionNumber = getExceptionNumber(properties);
+  const zoneTitle =
+    municipalityId === "brampton"
+      ? getNormalizedZoneTitle(normalized)
+      : getZoneTitle(properties);
+  const density = normalized.density || getDensity(properties);
+  const maxHeight = normalized.maxHeight || getMaxHeight(overlays);
+  const parkingZone = normalized.parkingZone || getParkingZone(overlays);
+  const exceptionNumber = normalized.exceptionNumber || getExceptionNumber(properties);
   const lotCoverage = getLotCoverage(overlays);
   const parkingDisplay = parkingZone
-    ? parkingZone.toLowerCase().startsWith("zone")
+    ? municipalityId === "brampton"
+      ? parkingZone
+      : parkingZone.toLowerCase().startsWith("zone")
       ? parkingZone
       : `Zone ${parkingZone}`
     : "";
@@ -248,16 +322,25 @@ export default function ZoningPanel({ zone }) {
     ["Frontage field", properties.frontage ? `${properties.frontage} m` : ""],
     ["Coverage", properties.coverage],
     ["Lot coverage", lotCoverage ? `${lotCoverage}%` : ""],
+    [
+      "Lot width",
+      normalized.lotWidth && municipalityId === "brampton"
+        ? `${normalized.lotWidth} m`
+        : normalized.lotWidth,
+    ],
+    ["Driveway regulation", normalized.drivewayRegulation],
   ];
   const bylawRows = [
-    ["Chapter", properties.bylaw_chapter],
-    ["Section", properties.bylaw_section],
-    ["Exception reference", properties.exception_reference],
+    ["Chapter", normalized.bylawChapter || properties.bylaw_chapter],
+    ["Section", normalized.bylawSection || properties.bylaw_section],
+    ["Reference", normalized.bylawReference || properties.exception_reference],
   ];
   const hasParsedRows = parsedRows.some(([, value]) => isDisplayableValue(value));
   const hasLotRows = lotRows.some(([, value]) => isDisplayableValue(value));
   const hasBylawRows = bylawRows.some(([, value]) => isDisplayableValue(value));
-  const hasMatchedOverlay = OVERLAY_SECTIONS.some(([key]) =>
+  const activeOverlaySections =
+    municipalityId === "brampton" ? BRAMPTON_OVERLAY_SECTIONS : OVERLAY_SECTIONS;
+  const hasMatchedOverlay = activeOverlaySections.some(([key]) =>
     (overlays[key] ?? []).some(
       (item) => getUsefulOverlayFacts(key, item).length > 0,
     ),
@@ -266,7 +349,8 @@ export default function ZoningPanel({ zone }) {
   return (
     <aside className="zoning-panel" aria-label="Selected zoning details">
       <div className="panel-header">
-        <p className="eyebrow">Toronto zoning lookup</p>
+        <p className="eyebrow">{municipality.name} zoning lookup</p>
+        <p className="municipality-kicker">{municipality.name}</p>
         <h1 className="zoning-title">{zoneTitle}</h1>
       </div>
 
@@ -278,24 +362,54 @@ export default function ZoningPanel({ zone }) {
 
       <section className="zoning-summary-card">
         <h2>Summary</h2>
-        <p>{buildPlainEnglishSummary(properties, overlays)}</p>
+        <p>{buildMunicipalitySummary(normalized, overlays)}</p>
       </section>
 
       <SectionCard title="Key Requirements / Development Snapshot">
         <div className="requirements-grid">
           <RequirementCard label="Zone" value={zoneTitle} />
-          <RequirementCard label="Density" value={density ? `${density} FSI` : ""} />
+          <RequirementCard label="Category" value={normalized.zoneCategory} />
           <RequirementCard
-            label="Maximum Height"
-            value={maxHeight ? `${maxHeight} m` : ""}
+            label={municipalityId === "brampton" ? "Density / FSI" : "Density"}
+            value={density ? `${density} FSI` : ""}
           />
           <RequirementCard
-            label="Parking Zone"
+            label="Maximum Height"
+            value={
+              maxHeight
+                ? municipalityId === "brampton"
+                  ? `${maxHeight} storeys`
+                  : `${maxHeight} m`
+                : ""
+            }
+          />
+          <RequirementCard
+            label={
+              municipalityId === "brampton"
+                ? "Parking Regulation Area"
+                : "Parking Zone"
+            }
             value={parkingDisplay}
           />
           <RequirementCard
             label="Site-specific Exception"
             value={exceptionNumber}
+          />
+          <RequirementCard
+            label="Special Section"
+            value={municipalityId === "brampton" ? normalized.bylawReference : ""}
+          />
+          <RequirementCard
+            label="Lot Width"
+            value={
+              municipalityId === "brampton" && normalized.lotWidth
+                ? `${normalized.lotWidth} m`
+                : ""
+            }
+          />
+          <RequirementCard
+            label="Driveway Regulation"
+            value={normalized.drivewayRegulation}
           />
         </div>
       </SectionCard>
@@ -321,7 +435,7 @@ export default function ZoningPanel({ zone }) {
       {hasMatchedOverlay ? (
         <SectionCard title="Matched Overlays">
           <div className="overlay-sections">
-            {OVERLAY_SECTIONS.map(([key, title]) => (
+            {activeOverlaySections.map(([key, title]) => (
               <MatchedOverlay
                 key={key}
                 title={title}
@@ -333,8 +447,24 @@ export default function ZoningPanel({ zone }) {
         </SectionCard>
       ) : null}
 
-      <AdvancedRawData mainProperties={properties} overlays={overlays} />
-      <SharedFooter />
+      {municipalityId === "brampton" ? (
+        <section className="overlay-source-note">
+          Some Brampton height, density, parking, and lot-width values come from
+          Brampton CZBL schedule overlay layers. Verify with official City of
+          Brampton zoning sources.
+        </section>
+      ) : null}
+
+      <AdvancedRawData
+        mainProperties={properties}
+        overlays={overlays}
+        municipalityId={municipalityId}
+      />
+      <SharedFooter
+        municipalityName={municipality.name}
+        sourceName={normalized.sourceName}
+        sourceUrl={normalized.sourceUrl}
+      />
     </aside>
   );
 }

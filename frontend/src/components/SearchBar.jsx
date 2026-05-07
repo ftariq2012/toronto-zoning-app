@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 export default function SearchBar({
+  municipalityName = "Toronto",
   status,
   onSearchAddresses,
   onSelectAddress,
@@ -46,7 +47,7 @@ export default function SearchBar({
   }, [normalizedQuery, onSearchAddresses]);
 
   const selectAddress = (address) => {
-    setQuery(address.address_label);
+    setQuery(address.address_label || address.displayAddress || "");
     setSuggestions([]);
     onSelectAddress(address);
   };
@@ -73,7 +74,7 @@ export default function SearchBar({
         type="search"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search a Toronto address"
+        placeholder={`Search a ${municipalityName} address`}
         autoComplete="off"
       />
 
@@ -92,25 +93,41 @@ export default function SearchBar({
       ) : null}
 
       {status === "fallback" ? (
-        <p className="search-message">Backend unavailable. Using local address fallback.</p>
+        <p className="search-message">
+          Backend unavailable. Using local address fallback.
+        </p>
+      ) : null}
+
+      {status === "partial" ? (
+        <p className="search-message">
+          Some {municipalityName} address matches may not include map coordinates.
+        </p>
       ) : null}
 
       {status === "missing" ? (
         <p className="search-message">
-          Address search data not found. Load PostGIS or run the data preparation scripts.
+          {municipalityName} address search is unavailable. Try a different
+          address or click the map.
         </p>
       ) : null}
 
       {normalizedQuery.length >= 3 && searchState === "ready" && !suggestions.length ? (
-        <p className="search-message">No matching addresses found.</p>
+        <p className="search-message">
+          No {municipalityName} address found. Try a full address or click the map.
+        </p>
       ) : null}
 
       {suggestions.length ? (
         <ul className="suggestions">
           {suggestions.map((address) => (
-            <li key={`${address.address_label}-${address.lat}-${address.lng}`}>
+            <li
+              key={`${address.address_label || address.displayAddress}-${address.lat}-${address.lng}`}
+            >
               <button type="button" onClick={() => selectAddress(address)}>
-                {address.address_label}
+                {address.address_label || address.displayAddress}
+                {address.lat === null || address.lng === null ? (
+                  <span className="suggestion-note">No map coordinate</span>
+                ) : null}
               </button>
             </li>
           ))}

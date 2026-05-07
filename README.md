@@ -1,8 +1,10 @@
-# Toronto Zoning Lookup
+# Municipal Zoning Lookup
 
-A Toronto zoning lookup app using React, Vite, Leaflet, Turf.js, FastAPI, and PostGIS.
+A local zoning lookup app using React, Vite, Leaflet, Turf.js, FastAPI, and PostGIS.
 
-The app lets users click a map location or search a Toronto address, then returns the main zoning area, matching overlays, by-law references, and a plain-English summary. Data comes from City of Toronto Open Data through the CKAN API.
+The app currently supports Toronto and Brampton. Users can pick a municipality, click a zoning polygon, or search an address where address coordinates are available. The side panel returns normalized zoning details, by-law references, plain-English summaries, and advanced raw data.
+
+Toronto data comes from City of Toronto Open Data through the CKAN API. Brampton zoning polygons are loaded through a FastAPI proxy to Brampton's ArcGIS REST zoning service.
 
 ## Project Structure
 
@@ -97,7 +99,7 @@ Cleaned frontend-ready GeoJSON files are written to:
 frontend/public/data/
 ```
 
-The PostGIS loader creates these tables:
+The PostGIS loader currently creates Toronto tables:
 
 - `zoning_area`
 - `zoning_height_overlay`
@@ -110,20 +112,25 @@ The PostGIS loader creates these tables:
 - `zoning_rooming_house_overlay`
 - `address_points`
 
+Brampton is proxied from ArcGIS for this phase and is not loaded into PostGIS yet.
+
 ## Run Backend
 
 From `backend/`:
 
 ```bash
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8010
 ```
 
 Useful local URLs:
 
 ```text
-http://localhost:8000/health
-http://localhost:8000/docs
-http://localhost:8000/api/zoning?lat=43.6532&lng=-79.3832
+http://127.0.0.1:8010/health
+http://127.0.0.1:8010/docs
+http://127.0.0.1:8010/api/zoning?lat=43.6532&lng=-79.3832
+http://127.0.0.1:8010/api/municipalities
+http://127.0.0.1:8010/api/municipalities/brampton/zoning-geojson
+http://127.0.0.1:8010/api/municipalities/brampton/overlays
 ```
 
 ## Run Frontend
@@ -138,7 +145,7 @@ npm run dev
 The frontend uses:
 
 ```text
-VITE_API_URL=http://localhost:8000
+VITE_API_URL=http://127.0.0.1:8010
 ```
 
 See `frontend/.env.example`.
@@ -150,9 +157,12 @@ The frontend remains deployable to Vercel as a static Vite app. The FastAPI back
 ## Current Architecture
 
 ```text
-City of Toronto CKAN API
+Brampton ArcGIS REST services are proxied through FastAPI so the frontend does not depend directly on the external service.
+
+```text
+City of Toronto CKAN API / Brampton ArcGIS REST
   -> Python download/prepare scripts
-  -> PostGIS
+  -> PostGIS for Toronto, backend proxy for Brampton
   -> FastAPI
   -> React + Leaflet frontend
 ```
@@ -172,4 +182,4 @@ Future production work should include:
 
 ## Disclaimer
 
-This tool is for informational purposes only and is not legal or planning advice. Zoning information may be affected by exceptions, site-specific amendments, former by-laws, appeals, or other conditions. Always verify zoning information with official City of Toronto sources before making planning, building, or purchasing decisions.
+This tool is for informational purposes only and is not legal or planning advice. Zoning information may be affected by exceptions, site-specific amendments, former by-laws, appeals, or other conditions. Always verify zoning information with the official municipality before making planning, building, or purchasing decisions.
