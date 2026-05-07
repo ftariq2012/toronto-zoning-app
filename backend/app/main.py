@@ -2,10 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routes import addresses, health, zoning
+from .routes import addresses, health, municipalities, zoning
 
 
-app = FastAPI(title="Toronto Zoning API")
+app = FastAPI(title="GTA Zoning Lookup API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,5 +16,6 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(municipalities.router, prefix="/api/municipalities", tags=["municipalities"])
 app.include_router(addresses.router, prefix="/api/addresses", tags=["addresses"])
 app.include_router(zoning.router, prefix="/api/zoning", tags=["zoning"])
